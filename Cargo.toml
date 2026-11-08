@@ -1,6 +1,6 @@
 [package]
 name = "turnoffmonitor"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2021"
 rust-version = "1.74"
 description = "Turn off your monitors with one hotkey. One tiny exe, no installer, no admin."
@@ -23,6 +23,7 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_IO",
     "Win32_System_LibraryLoader",
     "Win32_System_Memory",
+    "Win32_System_ProcessStatus",
     "Win32_System_Registry",
     "Win32_System_Shutdown",
     "Win32_System_Threading",
