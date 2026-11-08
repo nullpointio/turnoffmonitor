@@ -4,10 +4,10 @@
 
 <h1 align="center">Turn Off Monitor</h1>
 
-<p align="center"><b>One hotkey, monitors off. 52 KB, single exe, no installer, no runtime.</b></p>
+<p align="center"><b>One hotkey, monitors off. 58 KB, single exe, no installer, no runtime.</b></p>
 
 The tools that already do this are 877 KB with an installer and last updated in 2019, or 119 KB with no
-hotkey at all. This is a 52 KB Win32 binary that sits in the tray and listens for `Ctrl+Alt+M`.
+hotkey at all. This is a 58 KB Win32 binary that sits in the tray and listens for `Ctrl+Alt+M`.
 
 ## Download
 
@@ -48,13 +48,51 @@ that, you don't want this tool.
 
 | | Bytes |
 |---|---|
-| **This tool** | **52,736** |
+| **This tool** | **59,392** |
 | NirCmd (`monitor off`, no hotkey) | 119,808 |
 | Sordum Monitor Off 1.1 (installer-free, frozen 2019) | 877,720 |
+
+(`59,392` is the stripped `x86_64-pc-windows-gnu` release build; CI prints the exact size of the MSVC
+binary it ships and fails above 61,440 bytes.)
 
 The binary is `no_std` Rust with a hand-declared entry point and no GUI framework — that is where the size
 goes. It ships with a real `.ico` embedded as a PE resource (16/32/48/256 px), used for the window, taskbar
 and tray.
+
+## Footprint
+
+Measured on real Windows 11 x64 (idle in the tray, hotkey registered, no menus open):
+
+| | Working set | Private bytes | CPU over 60 s |
+|---|---|---|---|
+| `turnoffmonitor.exe` idle | 10,116 K | 1,072 K | 0 % |
+
+That is close to the floor for a Win32 process: no runtime, no allocator warm-up, no timers except the
+250 ms one-shot used when switching displays off.
+
+**Method.** `turnoffmonitor -selftest` measures its own process and prints two lines, one before any test
+runs and one after the idle window:
+
+```
+MEM startup: <working set> K working set, <private> K private
+MEM idle-60s: 10116 K working set, 1072 K private (cpu=0 ms)
+```
+
+The second line is the measurement in the table above.
+
+- Working set and private bytes come from `K32GetProcessMemoryInfo` (`WorkingSetSize` and
+  `PagefileUsage`, the same "Commit size" Task Manager shows), sampled at startup and again after the
+  idle window.
+- CPU comes from `GetProcessTimes`: kernel + user time sampled before and after the idle window.
+- The idle window is not a `Sleep`. The self-test creates the tray window, registers the hotkey and then
+  blocks in the same `GetMessageW` pump the resident app uses for 60 s, ended by a one-shot `WM_TIMER`.
+  That is the real idle path, so the CPU delta is the real idle cost.
+- The run then asserts `mem-private` (under 3 MB), `cpu-idle` (exactly 0 ms), and `mem-working-set`
+  (a positive number was reported). A failed assertion exits 1, so CI fails.
+
+Wine numbers are indicative only: Wine adds its own runtime to the process, so `-selftest` under Wine
+reports roughly 16,000 K working set / 3,000 K private at startup and fails `mem-private`. The gate is
+enforced on Windows.
 
 ## Build
 
@@ -72,7 +110,9 @@ binary and fails the build above 60 KB.
 - 25 unit tests (argument parsing, hotkey grammar, registry value formatting) on Linux.
 - `-selftest` on Windows CI: hotkey registration, single-instance mutex, the broadcast call, and a registry
   dry-run all must pass before a release is created.
-- CI size gate: 60 KB.
+- Same run measures its own footprint: working set and private bytes at startup and after a 60 s idle
+  window, asserting private bytes under 3 MB and a CPU delta of exactly 0 ms.
+- CI size gate: 61,440 bytes.
 
 **Not verified on physical hardware:** that the display actually goes dark, and how the tray icon renders —
 Wine treats `SC_MONITORPOWER` as a no-op. If it fails on your machine, open an issue with your Windows build

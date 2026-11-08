@@ -16,20 +16,23 @@ use core::ptr::{null, null_mut};
 use core::sync::atomic::{AtomicU32, AtomicU8, AtomicUsize, Ordering};
 
 use windows_sys::Win32::Foundation::{
-    GetLastError, BOOL, ERROR_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, HINSTANCE, HWND,
-    LPARAM, LRESULT, POINT, WPARAM,
+    GetLastError, BOOL, ERROR_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, FILETIME,
+    HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, WriteFile, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 use windows_sys::Win32::System::Console::{AttachConsole, GetStdHandle, ATTACH_PARENT_PROCESS};
 use windows_sys::Win32::System::LibraryLoader::{GetModuleFileNameW, GetModuleHandleW};
+use windows_sys::Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
 use windows_sys::Win32::System::Registry::{
     RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
     HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_DWORD, REG_SZ,
 };
 use windows_sys::Win32::System::Shutdown::LockWorkStation;
-use windows_sys::Win32::System::Threading::{CreateMutexW, Sleep};
+use windows_sys::Win32::System::Threading::{
+    CreateMutexW, GetCurrentProcess, GetProcessTimes, Sleep,
+};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, UnregisterHotKey};
 use windows_sys::Win32::UI::Shell::{
     Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
@@ -76,6 +79,12 @@ const TPM_NONOTIFY: u32 = 0x0080;
 
 const HOTKEY_ID: i32 = 1;
 const TIMER_ID: usize = 1;
+/// Second timer id, used only by `-selftest` to close the idle window.
+const IDLE_TIMER_ID: usize = 2;
+/// Length of the idle sample in `-selftest`, as the issue specifies.
+const IDLE_WINDOW_MS: u32 = 60_000;
+/// Acceptance ceiling for private bytes (issue #4).
+const PRIVATE_BUDGET_BYTES: usize = 3 * 1024 * 1024;
 /// Let the key-up be processed before the display is switched off, otherwise
 /// the release itself wakes the monitor again.
 const OFF_DELAY_MS: u32 = 250;
@@ -689,6 +698,47 @@ pub fn dispatch(cmd: Command) -> i32 {
 // Selftest
 // ---------------------------------------------------------------------------
 
+// Footprint probes (issue #4): working set, private bytes, CPU time.
+
+/// Working set and private bytes (`PagefileUsage`, what Task Manager calls
+/// "Commit size") for this process, in bytes.
+fn process_memory() -> Option<(usize, usize)> {
+    unsafe {
+        let mut counters: PROCESS_MEMORY_COUNTERS = zeroed();
+        counters.cb = size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+        if K32GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, counters.cb) == 0 {
+            return None;
+        }
+        Some((counters.WorkingSetSize, counters.PagefileUsage))
+    }
+}
+
+/// Kernel + user CPU time for this process, in 100 ns ticks.
+fn process_cpu_ticks() -> Option<u64> {
+    unsafe {
+        let mut created: FILETIME = zeroed();
+        let mut exited: FILETIME = zeroed();
+        let mut kernel: FILETIME = zeroed();
+        let mut user: FILETIME = zeroed();
+        if GetProcessTimes(
+            GetCurrentProcess(),
+            &mut created,
+            &mut exited,
+            &mut kernel,
+            &mut user,
+        ) == 0
+        {
+            return None;
+        }
+        let ticks = |f: &FILETIME| ((f.dwHighDateTime as u64) << 32) | f.dwLowDateTime as u64;
+        Some(ticks(&kernel) + ticks(&user))
+    }
+}
+
+fn mem_text(mem: (usize, usize)) -> String {
+    format!("{} K working set, {} K private", mem.0 / 1024, mem.1 / 1024)
+}
+
 pub fn selftest() -> i32 {
     let mut passed = 0u32;
     let mut failed = 0u32;
@@ -702,6 +752,12 @@ pub fn selftest() -> i32 {
             "gui"
         }
     ));
+
+    let startup = process_memory();
+    print(match startup {
+        Some(mem) => format!("MEM startup: {}\n", mem_text(mem)),
+        None => "MEM startup: unavailable\n".to_string(),
+    });
 
     let mut line = |ok: bool, name: &str, detail: String| {
         if ok {
@@ -751,6 +807,7 @@ pub fn selftest() -> i32 {
     // Dry run: snapshot now, and prove at the end that nothing was written.
     let run_before = run_entry_present();
 
+    let mut live: Option<HWND> = None;
     unsafe {
         let name = wide(SELFTEST_MUTEX);
         let handle = CreateMutexW(null_mut(), 0, name.as_ptr());
@@ -774,8 +831,7 @@ pub fn selftest() -> i32 {
                         format!("{} rejected, GetLastError={err}", app::format_hotkey(&hk))
                     },
                 );
-                UnregisterHotKey(hwnd, HOTKEY_ID);
-                DestroyWindow(hwnd);
+                live = Some(hwnd);
             }
             None => line(false, "hotkey-register", "window creation failed".into()),
         }
@@ -786,6 +842,85 @@ pub fn selftest() -> i32 {
             "broadcast",
             "PostMessage(HWND_BROADCAST, WM_SYSCOMMAND, SC_MONITORPOWER, 2) accepted".into(),
         );
+    }
+
+    // Idle window: sit in the same blocking `GetMessage` pump the tray app uses,
+    // with the hotkey registered and the tray window alive, for 60 s. A timer
+    // ends the sample. No polling, so the CPU delta is the real idle cost.
+    let cpu_before = process_cpu_ticks();
+    unsafe {
+        match live {
+            Some(hwnd) => {
+                SetTimer(hwnd, IDLE_TIMER_ID, IDLE_WINDOW_MS, None);
+                let mut msg: MSG = zeroed();
+                while GetMessageW(&mut msg, hwnd, 0, 0) > 0 {
+                    if msg.message == WM_TIMER && msg.wParam == IDLE_TIMER_ID {
+                        KillTimer(hwnd, IDLE_TIMER_ID);
+                        break;
+                    }
+                    TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+            }
+            None => Sleep(IDLE_WINDOW_MS),
+        }
+    }
+    let idle = process_memory();
+    let cpu_ticks = match (cpu_before, process_cpu_ticks()) {
+        (Some(before), Some(after)) => Some(after.saturating_sub(before)),
+        _ => None,
+    };
+    let cpu_ms = cpu_ticks.map(|t| t / 10_000);
+    print(match idle {
+        Some(mem) => format!(
+            "MEM idle-{}s: {} (cpu={} ms)\n",
+            IDLE_WINDOW_MS / 1000,
+            mem_text(mem),
+            cpu_ms
+                .map(|ms| format!("{ms}"))
+                .unwrap_or_else(|| "-".to_string())
+        ),
+        None => "MEM idle: unavailable\n".to_string(),
+    });
+
+    line(
+        idle.is_some_and(|(ws, _)| ws > 0),
+        "mem-working-set",
+        match idle {
+            Some(mem) => format!("{} K reported", mem.0 / 1024),
+            None => "K32GetProcessMemoryInfo failed".into(),
+        },
+    );
+    line(
+        idle.is_some_and(|(_, private)| private < PRIVATE_BUDGET_BYTES),
+        "mem-private",
+        match idle {
+            Some((_, private)) => format!(
+                "{} K private, budget {} K (< 3 MB)",
+                private / 1024,
+                PRIVATE_BUDGET_BYTES / 1024
+            ),
+            None => "unavailable".into(),
+        },
+    );
+    line(
+        cpu_ticks == Some(0),
+        "cpu-idle",
+        match cpu_ticks {
+            Some(ticks) => format!(
+                "{} ms CPU over {} s idle",
+                ticks / 10_000,
+                IDLE_WINDOW_MS / 1000
+            ),
+            None => "GetProcessTimes failed".into(),
+        },
+    );
+
+    unsafe {
+        if let Some(hwnd) = live {
+            UnregisterHotKey(hwnd, HOTKEY_ID);
+            DestroyWindow(hwnd);
+        }
     }
 
     line(
