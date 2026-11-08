@@ -26,13 +26,29 @@ fn main() {
 
     // The binary's entry point, per toolchain. `rustc-link-arg-bins` keeps the
     // test harness (which does have a CRT `main`) unaffected.
+    //
+    // A custom entry point also removes the linker's ability to infer the
+    // subsystem, so it must be stated explicitly: MSVC fails with LNK1221 and
+    // MinGW guesses wrong otherwise. The `console` feature exists so -selftest
+    // can print on Windows CI, and it needs the console subsystem.
+    let console = env::var("CARGO_FEATURE_CONSOLE").is_ok();
     match target_env.as_str() {
         "msvc" => {
             println!("cargo:rustc-link-arg-bins=/ENTRY:mainCRTStartup");
+            if console {
+                println!("cargo:rustc-link-arg-bins=/SUBSYSTEM:CONSOLE");
+            } else {
+                println!("cargo:rustc-link-arg-bins=/SUBSYSTEM:WINDOWS");
+            }
         }
         _ => {
             println!("cargo:rustc-link-arg-bins=-nostartfiles");
             println!("cargo:rustc-link-arg-bins=-Wl,-e,mainCRTStartup");
+            if console {
+                println!("cargo:rustc-link-arg-bins=-Wl,--subsystem,console");
+            } else {
+                println!("cargo:rustc-link-arg-bins=-Wl,--subsystem,windows");
+            }
         }
     }
 
