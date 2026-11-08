@@ -35,6 +35,10 @@ fn main() {
     match target_env.as_str() {
         "msvc" => {
             println!("cargo:rustc-link-arg-bins=/ENTRY:mainCRTStartup");
+            // no_std skips the CRT, but Rust still emits calls to memcpy/memcmp/wcslen
+            // and to the C++ frame handler; those live in the CRT import libraries.
+            println!("cargo:rustc-link-arg-bins=/DEFAULTLIB:msvcrt.lib");
+            println!("cargo:rustc-link-arg-bins=/DEFAULTLIB:vcruntime.lib");
             if console {
                 println!("cargo:rustc-link-arg-bins=/SUBSYSTEM:CONSOLE");
             } else {
