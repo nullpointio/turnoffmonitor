@@ -16,12 +16,12 @@ use std::process::Command;
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=assets/icon.ico");
+    println!("cargo:rerun-if-changed=assets/turnoffmonitor.rc");
 
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }
 
-    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
     let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
 
     // The binary's entry point, per toolchain. `rustc-link-arg-bins` keeps the
@@ -56,25 +56,25 @@ fn main() {
         }
     }
 
-    match compile_resource(&out_dir, &target_env) {
+    match compile_resource(&target_env) {
         Some(obj) => println!("cargo:rustc-link-arg-bins={}", obj.display()),
-        None => panic!("could not compile assets/icon.ico into a PE resource"),
+        None => panic!("could not compile assets/turnoffmonitor.rc into a PE resource"),
     }
 }
 
-/// Write a minimal `.rc` (no `windows.h` needed for a numeric icon ID) and
-/// compile it to a COFF object (MinGW) or `.res` (MSVC).
-fn compile_resource(out_dir: &Path, target_env: &str) -> Option<PathBuf> {
-    let icon = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/icon.ico");
-    if !icon.is_file() {
-        println!("cargo:warning=missing {}", icon.display());
+/// Compile `assets/turnoffmonitor.rc` (icon + VERSIONINFO, so both land in the
+/// same resource object) to a COFF object (MinGW) or `.res` (MSVC).
+///
+/// The `.rc` refers to its siblings by bare name (`icon.ico`), so the assets
+/// directory is handed to the resource compiler as an include path.
+fn compile_resource(target_env: &str) -> Option<PathBuf> {
+    let assets = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
+    let rc_path = assets.join("turnoffmonitor.rc");
+    if !rc_path.is_file() {
+        println!("cargo:warning=missing {}", rc_path.display());
         return None;
     }
-
-    let rc_path = out_dir.join("app.rc");
-    let icon_path = icon.to_string_lossy().replace('\\', "\\\\");
-    std::fs::write(&rc_path, format!("1 ICON \"{icon_path}\"\n")).ok()?;
-    println!("cargo:rerun-if-changed={}", rc_path.display());
+    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
 
     if target_env == "msvc" {
         let rc = find_msvc_rc()?;
@@ -82,6 +82,8 @@ fn compile_resource(out_dir: &Path, target_env: &str) -> Option<PathBuf> {
         let ok = run(
             Command::new(&rc)
                 .arg("/nologo")
+                .arg("/I")
+                .arg(&assets)
                 .arg("/fo")
                 .arg(&res)
                 .arg(&rc_path),
@@ -93,6 +95,8 @@ fn compile_resource(out_dir: &Path, target_env: &str) -> Option<PathBuf> {
         let obj = out_dir.join("app-resource.o");
         let ok = run(
             Command::new(&windres)
+                .arg("-I")
+                .arg(&assets)
                 .arg(&rc_path)
                 .args(["-O", "coff", "-o"])
                 .arg(&obj),

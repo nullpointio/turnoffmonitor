@@ -1,14 +1,24 @@
-# Turn Off Monitor v1.0.0
+# Turn Off Monitor v1.0.1 — version info in the exe
 
-**One hotkey, monitors off. 50 KB, single exe, no installer, no runtime.**
+**One hotkey, monitors off. 56 KB, single exe, no installer, no runtime.**
 
 Existing tools that do this are 880 KB with an installer (Sordum), 120 KB without a hotkey (NirCmd), or
-last updated in 2019. This is a 50 KB Win32 binary that sits in the tray and listens for `Ctrl+Alt+M`.
+last updated in 2019. This is a 56 KB Win32 binary that sits in the tray and listens for `Ctrl+Alt+M`.
+
+## What changed in 1.0.1
+
+- The exe now carries a PE `VERSIONINFO` resource, so Task Manager's **Description** column and
+  Explorer's Details tab show a product name and version instead of `TurnOffMonitor.ex…`.
+- Fields: `CompanyName=nullpointio`, `ProductName=Turn Off Monitor`, `FileDescription=Turn off all
+  monitors with one hotkey`, `FileVersion`/`ProductVersion=1.0.1.0`, `OriginalFilename=TurnOffMonitor.exe`,
+  `LegalCopyright=MIT License — nullpointio`.
+- `Cargo.toml` was still at `0.1.0` while the tag said `v1.0.0`; it is now `1.0.1`, so `-version`
+  and the resource agree. No behaviour change.
 
 ## Downloads
 
-- `TurnOffMonitor.exe` — 51,712 bytes, Windows 10/11 x64. Portable: run it, and it stays in the tray.
-- `TurnOffMonitor-v1.0.0-win-x64.zip` — the same file, zipped.
+- `TurnOffMonitor.exe` — 57,344 bytes, Windows 10/11 x64. Portable: run it, and it stays in the tray.
+- `TurnOffMonitor-v1.0.1-win-x64.zip` — the same file, zipped.
 - `SHA256SUMS.txt` — `powershell -c "(Get-FileHash .\TurnOffMonitor.exe -Algorithm SHA256).Hash"`
 
 ## Use

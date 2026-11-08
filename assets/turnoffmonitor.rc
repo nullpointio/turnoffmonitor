@@ -1,0 +1,45 @@
+// Win32 resources for TurnOffMonitor.exe, compiled by build.rs with windres
+// (*-windows-gnu) or rc.exe (*-msvc). Both read this file from assets/ via -I.
+//
+// code_page(65001) is what lets rc.exe read this file as UTF-8; windres does so
+// by default. Keep the file UTF-8 without a BOM.
+#pragma code_page(65001)
+
+// The application icon. The `ICON` keyword (rather than a numeric RT_GROUP_ICON
+// id) makes the resource compiler unpack the .ico into one RT_ICON per frame
+// plus the RT_GROUP_ICON directory Explorer and the tray read. Id 1 is also the
+// id the Win32 code loads at runtime.
+1 ICON "icon.ico"
+
+// Version stamp read by Task Manager's Description column, Explorer's Details
+// tab and `(Get-Item .\TurnOffMonitor.exe).VersionInfo`. Keep every version
+// field in sync with [package] version in Cargo.toml.
+1 VERSIONINFO
+FILEVERSION 1,0,1,0
+PRODUCTVERSION 1,0,1,0
+FILEFLAGSMASK 0x3fL
+FILEFLAGS 0x0L
+FILEOS 0x40004L
+FILETYPE 0x1L
+FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "nullpointio"
+            VALUE "FileDescription", "Turn off all monitors with one hotkey"
+            VALUE "FileVersion", "1.0.1.0"
+            VALUE "InternalName", "turnoffmonitor"
+            VALUE "LegalCopyright", "MIT License — nullpointio"
+            VALUE "OriginalFilename", "TurnOffMonitor.exe"
+            VALUE "ProductName", "Turn Off Monitor"
+            VALUE "ProductVersion", "1.0.1.0"
+            VALUE "Comments", "One hotkey, one tiny exe. No installer, no admin rights."
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
