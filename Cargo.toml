@@ -1,6 +1,6 @@
 [package]
 name = "turnoffmonitor"
-version = "0.1.0"
+version = "1.0.1"
 edition = "2021"
 rust-version = "1.74"
 description = "Turn off your monitors with one hotkey. One tiny exe, no installer, no admin."
