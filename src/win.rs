@@ -35,10 +35,11 @@ use windows_sys::Win32::UI::Shell::{
     Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreateIcon, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyIcon,
-    DestroyMenu, DestroyWindow, DispatchMessageW, GetCursorPos, GetMessageW, KillTimer,
-    LoadCursorW, PostMessageW, PostQuitMessage, RegisterClassW, RegisterWindowMessageW,
-    SetForegroundWindow, SetTimer, TrackPopupMenu, TranslateMessage, HICON, MSG, WNDCLASSW,
+    AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
+    DispatchMessageW, GetCursorPos, GetMessageW, GetSystemMetrics, KillTimer, LoadCursorW,
+    LoadIconW, LoadImageW, PostMessageW, PostQuitMessage, RegisterClassW, RegisterWindowMessageW,
+    SetForegroundWindow, SetTimer, TrackPopupMenu, TranslateMessage, HICON, IDI_APPLICATION,
+    IMAGE_ICON, LR_DEFAULTSIZE, LR_SHARED, MSG, SM_CXSMICON, WNDCLASSW,
 };
 
 use crate::app::{self, Command, Hotkey};
@@ -374,47 +375,26 @@ fn write_state(value: u32) {
 // Tray icon
 // ---------------------------------------------------------------------------
 
-/// 16x16 monochrome monitor glyph, built at runtime so no `.ico` resource and
-/// no resource compiler are needed. `#` = opaque white, `.` = transparent.
-const ICON_ROWS: [&str; 16] = [
-    "................",
-    "................",
-    "..############..",
-    "..#..........#..",
-    "..#..........#..",
-    "..#..........#..",
-    "..#..........#..",
-    "..#..........#..",
-    "..############..",
-    ".......##.......",
-    "......####......",
-    ".....######.....",
-    "....########....",
-    "................",
-    "................",
-    "................",
-];
+/// Icon resource ID declared in `build.rs` (`1 ICON "assets/icon.ico"`).
+const ICON_RESOURCE: usize = 1;
+const ICON_RESOURCE_NAME: *const u16 = ICON_RESOURCE as *const u16;
 
-fn icon_bits() -> ([u8; 32], [u8; 32]) {
-    let mut and = [0u8; 32];
-    let mut xor = [0u8; 32];
-    for (y, row) in ICON_ROWS.iter().enumerate() {
-        for (x, ch) in row.bytes().enumerate() {
-            let idx = y * 2 + x / 8;
-            let bit = 0x80 >> (x % 8);
-            if ch == b'#' {
-                xor[idx] |= bit;
-            } else {
-                and[idx] |= bit;
-            }
-        }
+/// Load the embedded multi-size icon; fall back to the system default if the
+/// resource is somehow missing. `LR_SHARED` means the handle must not be
+/// destroyed, which is why `WM_DESTROY` only forgets it. `cx == 0` asks for the
+/// system icon size (window class), otherwise an exact small-icon size (tray).
+unsafe fn load_icon(hinst: HINSTANCE, cx: i32) -> HICON {
+    let flags = if cx == 0 {
+        LR_DEFAULTSIZE | LR_SHARED
+    } else {
+        LR_SHARED
+    };
+    let icon = LoadImageW(hinst, ICON_RESOURCE_NAME, IMAGE_ICON, cx, cx, flags) as HICON;
+    if icon.is_null() {
+        LoadIconW(null_mut(), IDI_APPLICATION)
+    } else {
+        icon
     }
-    (and, xor)
-}
-
-unsafe fn make_icon(hinst: HINSTANCE) -> HICON {
-    let (and, xor) = icon_bits();
-    CreateIcon(hinst, 16, 16, 1, 1, and.as_ptr(), xor.as_ptr())
 }
 
 fn tray_data(hwnd: HWND) -> NOTIFYICONDATAW {
@@ -533,10 +513,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
         WM_DESTROY | WM_ENDSESSION => {
             UnregisterHotKey(hwnd, HOTKEY_ID);
             tray_remove(hwnd);
-            let icon = ICON_HANDLE.swap(0, Ordering::SeqCst) as HICON;
-            if !icon.is_null() {
-                DestroyIcon(icon);
-            }
+            // The icon is a shared resource handle (LR_SHARED); never destroy it.
+            ICON_HANDLE.store(0, Ordering::SeqCst);
             PostQuitMessage(0);
             0
         }
@@ -553,13 +531,18 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
 
 unsafe fn create_window(hinst: HINSTANCE) -> Option<HWND> {
     let class = wide(CLASS_NAME);
+    let icon = load_icon(hinst, 0);
+    let small = load_icon(hinst, GetSystemMetrics(SM_CXSMICON));
+    if !small.is_null() {
+        ICON_HANDLE.store(small as usize, Ordering::SeqCst);
+    }
     let wc = WNDCLASSW {
         style: 0,
         lpfnWndProc: Some(wndproc),
         cbClsExtra: 0,
         cbWndExtra: 0,
         hInstance: hinst,
-        hIcon: null_mut(),
+        hIcon: icon,
         hCursor: LoadCursorW(null_mut(), IDC_ARROW_PTR as *const u16),
         hbrBackground: null_mut(),
         lpszMenuName: null(),
@@ -620,10 +603,6 @@ pub fn run_resident(hk: &Hotkey) -> i32 {
             Ordering::SeqCst,
         );
 
-        let icon = make_icon(hinst);
-        if !icon.is_null() {
-            ICON_HANDLE.store(icon as usize, Ordering::SeqCst);
-        }
         tray_add(hwnd);
 
         if !register_hotkey(hwnd, hk) {
