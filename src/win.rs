@@ -157,6 +157,19 @@ fn attach_console() {
 }
 
 /// The raw command line (`GetCommandLineW`), used instead of `std::env::args`.
+///
+/// The manual NUL scan below is recognised by LLVM as `wcslen` and emitted as a
+/// call to it. A `no_std` binary links no CRT, so without this definition the
+/// MSVC linker fails with LNK2019 on `wcslen` (MinGW resolves it from libmingwex).
+#[no_mangle]
+pub unsafe extern "C" fn wcslen(mut s: *const u16) -> usize {
+    let start = s;
+    while *s != 0 {
+        s = s.add(1);
+    }
+    s.offset_from(start) as usize
+}
+
 pub fn command_line() -> String {
     unsafe {
         let ptr = windows_sys::Win32::System::Environment::GetCommandLineW();
