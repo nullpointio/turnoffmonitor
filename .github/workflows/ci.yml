@@ -1,0 +1,104 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  SIZE_LIMIT: 61440
+
+jobs:
+  test:
+    name: Tests + lint (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --release
+
+  windows:
+    name: Windows build + self-test
+    runs-on: windows-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build console variant and run the self-test
+        shell: pwsh
+        run: |
+          cargo build --release --features console
+          if ($LASTEXITCODE -ne 0) { throw "build failed" }
+          .\target\release\turnoffmonitor.exe -selftest
+          if ($LASTEXITCODE -ne 0) { throw "self-test failed: $LASTEXITCODE" }
+
+      - name: Build release exe and enforce the size budget
+        shell: pwsh
+        run: |
+          cargo build --release
+          if ($LASTEXITCODE -ne 0) { throw "release build failed" }
+          Copy-Item target\release\turnoffmonitor.exe TurnOffMonitor.exe -Force
+          $size = (Get-Item TurnOffMonitor.exe).Length
+          Write-Host "TurnOffMonitor.exe = $size bytes"
+          if ($size -gt [int]$env:SIZE_LIMIT) { throw "size gate: $size bytes exceeds $env:SIZE_LIMIT" }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $ver = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { 'dev' }
+          Compress-Archive -Path TurnOffMonitor.exe -DestinationPath "TurnOffMonitor-$ver-win-x64.zip" -Force
+          $h = (Get-FileHash TurnOffMonitor.exe -Algorithm SHA256).Hash.ToLower()
+          $z = (Get-FileHash "TurnOffMonitor-$ver-win-x64.zip" -Algorithm SHA256).Hash.ToLower()
+          "$h  TurnOffMonitor.exe" | Out-File -Encoding ascii SHA256SUMS.txt
+          "$z  TurnOffMonitor-$ver-win-x64.zip" | Out-File -Encoding ascii -Append SHA256SUMS.txt
+          Get-Content SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: turnoffmonitor-win-x64
+          path: |
+            TurnOffMonitor.exe
+            TurnOffMonitor-*-win-x64.zip
+            SHA256SUMS.txt
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs: windows
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: turnoffmonitor-win-x64
+          path: release
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          find release -type f -printf '%p %s bytes\n'
+          mapfile -t ASSETS < <(find release -type f \( -name 'TurnOffMonitor.exe' -o -name '*.zip' -o -name 'SHA256SUMS.txt' \))
+          if [ ${#ASSETS[@]} -lt 3 ]; then echo "expected 3 assets, found ${#ASSETS[@]}"; exit 1; fi
+          gh release create "$TAG" "${ASSETS[@]}" \
+            --title "Turn Off Monitor $TAG" \
+            --notes-file RELEASE_NOTES.md

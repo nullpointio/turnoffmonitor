@@ -1,0 +1,44 @@
+[package]
+name = "turnoffmonitor"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.74"
+description = "Turn off your monitors with one hotkey. One tiny exe, no installer, no admin."
+license = "MIT"
+repository = "https://github.com/nullpointio/turnoffmonitor"
+publish = false
+
+[[bin]]
+name = "turnoffmonitor"
+path = "src/main.rs"
+
+[dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_Environment",
+    "Win32_System_IO",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Registry",
+    "Win32_System_Shutdown",
+    "Win32_System_Threading",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[features]
+default = []
+# Console subsystem: lets `-selftest` / `-version` print on Windows CI.
+console = []
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
