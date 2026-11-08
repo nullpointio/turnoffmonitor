@@ -71,13 +71,13 @@ mod rt {
     pub extern "C" fn rust_eh_personality() {}
 
     #[no_mangle]
-    pub extern "system" fn mainCRTStartup() -> i32 {
+    pub unsafe extern "system" fn mainCRTStartup() -> ! {
         crate::start()
     }
 }
 
 #[cfg(all(windows, not(test)))]
-fn start() -> i32 {
+fn start() -> ! {
     let line = win::command_line();
     let args = app::split_command_line(&line);
     let args: alloc::vec::Vec<String> = args.into_iter().skip(1).collect();
