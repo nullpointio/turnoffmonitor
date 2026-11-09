@@ -2,9 +2,9 @@
   <img src="docs/assets/icon.png" width="96" alt="Turn Off Monitor icon">
 </p>
 
-<h1 align="center">Turn Off Monitor</h1>
+<h1 align="center">Turn Off Monitor — Windows hotkey to turn off your display</h1>
 
-<p align="center"><b>One hotkey, monitors off. 58 KB, single exe, no installer, no runtime.</b></p>
+<p align="center"><b>Press <code>Ctrl+Alt+M</code> to turn off your monitor with a keyboard shortcut on Windows 10/11. 58 KB single exe, no installer, no runtime, no account.</b></p>
 
 The tools that already do this are 877 KB with an installer and last updated in 2019, or 119 KB with no
 hotkey at all. This is a 58 KB Win32 binary that sits in the tray and listens for `Ctrl+Alt+M`.
@@ -33,6 +33,14 @@ Tray menu: **Turn off monitors · Turn off and lock · Start with Windows · Qui
 
 Because `-off` and `-lock` exit immediately, both work as the target of a desktop shortcut, a scheduled
 task, or a Stream Deck button — no tray process needed.
+
+## Common questions
+
+**Is there a keyboard shortcut to turn off my monitor in Windows?** Windows has no built-in hotkey. Turn Off Monitor adds one: `Ctrl+Alt+M` by default, or any combo you pass with `-hotkey`. It sends the same `SC_MONITORPOWER` message Windows uses for its power button.
+
+**Can I turn off the monitor without putting the PC to sleep?** Yes. `-off` blanks the display and exits immediately, leaving Windows and your downloads running. Move the mouse or press a key to wake the display.
+
+**Does it work with multiple monitors?** It broadcasts to the desktop, so Windows turns off all attached displays together; there is no per-monitor hotkey.
 
 ## How it works
 
