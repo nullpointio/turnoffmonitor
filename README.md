@@ -126,6 +126,12 @@ binary and fails the build above 60 KB.
 Wine treats `SC_MONITORPOWER` as a no-op. If it fails on your machine, open an issue with your Windows build
 and GPU driver.
 
+## Archived copy
+
+An independent, permanently addressable copy of this repository is kept by Software Heritage:
+
+* snapshot `swh:1:snp:3d7d0a6f200e794e6c7e22256d5f1eca9fb0dd2d` — [https://archive.softwareheritage.org/swh:1:snp:3d7d0a6f200e794e6c7e22256d5f1eca9fb0dd2d;origin=https://github.com/nullpointio/turnoffmonitor](https://archive.softwareheritage.org/swh:1:snp:3d7d0a6f200e794e6c7e22256d5f1eca9fb0dd2d;origin=https://github.com/nullpointio/turnoffmonitor)
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
